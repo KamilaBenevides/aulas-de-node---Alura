@@ -1,90 +1,77 @@
-const conexao = require('../infraestrutura/conexão')
+const conexao = require('../infraestrutura/database/conexão')
 const moment = require('moment')
+const { default: axios } = require('axios')
+const repositorio = require('../repositorios/atendimentos')
 
 class Atendimentos {
-    adiciona(atendimento, res) {
+    constructor(){
+        this.dataEhValida = (dataAtendimento, dataCriacao) => moment(dataAtendimento)
+        .isSameOrAfter(dataCriacao)
+        this.clienteEhValido = (tamanho) => tamanho >= 5
+        this.valida = () => parametros => this.validacoes.filter(campo => {
+            const { nome } = campo
+            const parametro = parametros[nome]
+
+            return !campo.valido(parametro)
+        })
+        this.validacoes = [
+            {
+                nome: 'dataAtendimento',
+                valido: this.dataEhValida,
+                mensagem: 'Data deve ser maior ou igual a data atual'
+            },
+            {
+                nome: 'cliente',
+                valido: this.clienteEhValido,
+                mensagem: 'Cliente deve ser maior ou igual a 5 caracteres'
+            }
+        ]
+    }
+    adiciona(atendimento) {
          const dataCriacao = moment().format('YYYY-MM-DD HH:MM:SS')
          const dataAtendimento = moment(atendimento.dataAtendimento, 'DD/MM/YYYY').format('YYYY-MM-DD HH:MM:SS')
          
-         const dataEhValida = moment(dataAtendimento).isSameOrAfter(dataCriacao)
-         const clienteEhValido = atendimento.cliente.length >= 5
-
-         const validacoes = [
-             {
-                 nome: 'data',
-                 valido: dataEhValida,
-                 mensagem: 'Data deve ser maior ou igual a data atual'
-             },
-             {
-                 nome: 'cliente',
-                 valido: clienteEhValido,
-                 mensagem: 'Cliente deve ser maior ou igual a 5 caracteres'
-             }
-         ]
-         const erros = validacoes.filter(campo => !campo.valido)
+         const parametros = {
+             data: { dataAtendimento, dataCriacao },
+             cliente: { tamanho: atendimento.cliente.length }
+         }
+         const erros = this.valida(parametros)
          const existeErros = erros.length
          if(existeErros){
-             res.status(400).json(erros)
+             return new Promise((resolve, reject) => {reject(erros)})
          }
          else{
-            const atendimentoDatado = {...atendimento, dataAtendimento}
+            const atendimentoDatado = {...atendimento, dataCriacao, dataAtendimento}
 
-            const sql = 'INSERT INTO Atendimentos SET ?'
-    
-            conexao.query(sql, atendimentoDatado, (erro, resultados) => {
-                if(erro) {
-                    res.status(400).json(erro)
-                } else {
-                  res.json(atendimento)
-                }
-            })
+            return repositorio.adiciona(atendimentoDatado)
+                .then((resultados) => {
+                    const id = resultados.insertId
+                    return {...atendimento, id}
+                })
          }
          
     }
-    lista(res){
-         const sql = 'SELECT * FROM Atendimentos'
-         conexao.query(sql, (erro, resultados) =>{
-             if(erro){
-                 res.status(400).json(erro)
-             } else {
-                 res.status(200).json(resultados)
-             }
-         })
-         
+    lista(){
+         return repositorio.lista()
     }
-    buscaPorId(id, res) {
-        const sql = `SELECT * FROM Atendimentos WHERE id=${id}`
-        conexao.query(sql, (erro, resultados) =>{
-            const atendimento = resultados[0];
-            if(erro){
-                res.status(400).json(erro)
-            } else {
-                res.status(200).json(atendimento)
-            }
+    buscaPorId(id) {
+        return repositorio.buscaPorId(id)
+        .then( async (resultados) => {
+            const atendimento = resultados[0]
+            const cpf = atendimento.cliente
+            const { data } = await axios.get(`http://localhost:8082/${cpf}`)
+            atendimento.cliente = data
+            return atendimento
         })
     }
-    autera(id, valores, res) {
+    autera(id, valores) {
         if(valores.dataAtendimento){
             valores.dataAtendimento = moment(valores.dataAtendimento, 'DD/MM/YYYY').format('YYYY-MM-DD HH:MM:SS')
         }
-        const sql = 'UPDATE Atendimentos SET ? WHERE id=?'
-        conexao.query(sql, [valores, id], (erro, resultados) => {
-            if(erro){
-                res.status(400).json(erro)
-            } else {
-                res.status(200).json({...valores, id})
-            }
-        })
+        return repositorio.autera(valores, id)
     }
-    deleta(id, res){
-        const sql = 'DELETE FROM Atendimentos WHERE id=?'
-        conexao.query(sql, id, (erro, resultados) =>{
-            if(erro){
-                res.status(400).json(erro)
-            } else {
-                res.status(200).json(id)
-            }
-        })
+    deleta(id){
+        return repositorio.deleta(id)
     }
  }
  
